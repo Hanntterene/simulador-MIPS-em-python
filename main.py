@@ -188,6 +188,11 @@ if __name__ == "__main__":
         "LW $t3, 0, $zero",
         "PRINT $t3",
         "HALT"
+
+# add $t0, $t0, $zero
+# addi $t0, $zero, 5
+# print $t0
+
     ]
     sim.load_assembly(programa)
     sim.run()
