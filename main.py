@@ -86,13 +86,19 @@ class MIPSSimulator:
             return False  # Fim do programa
 
         instr = self.instructions[self.pc].strip()
+        pc_antigo = self.pc
         self.execute_instruction(instr)
-        self.pc += 1
+        # Só incrementa se o PC não mudou (não houve salto)
+        if self.pc == pc_antigo:
+            self.pc += 1
         return True
 
     def run(self, step_by_step=False):
         """Executa o programa até o fim."""
+        self.executed_binaries = []
         while self.pc < len(self.instructions):
+            instr = self.instructions[self.pc].strip()
+            self.executed_binaries.append(self.assembly_to_bin(instr))
             self.step()
             if step_by_step:
                 input(f"Pressione Enter para executar a próxima instrução ({self.instructions[self.pc-1]})...")
@@ -148,11 +154,11 @@ class MIPSSimulator:
             if self.registers[rs] != self.registers[rt]:
                 self.pc = self.labels[label]
                 return
-
-        # Saída (imprimir inteiro)
-        elif opcode == "PRINT":
-            reg = tokens[1]
-            print(self.registers[reg])
+        # Salto incondicional (JUMP)
+        elif opcode == "J" or opcode == "JUMP":
+            label = tokens[1]
+            self.pc = self.labels[label]
+            return
 
         # Chamada de sistema (SYSCALL)
         elif opcode == "SYSCALL":
@@ -166,10 +172,6 @@ class MIPSSimulator:
                 self.pc = len(self.instructions)
             else:
                 raise ValueError(f"Syscall não implementada: {v0}")
-
-        # Fim do programa
-        elif opcode == "HALT":
-            self.pc = len(self.instructions)  # Força parada
 
         else:
             raise ValueError(f"Instrução não reconhecida: {opcode}")
@@ -185,6 +187,25 @@ class MIPSSimulator:
         print(self.registers)
         print("\nMemória:")
         print(self.memory)
+
+    def assembly_to_bin(self, instr):
+        tokens = re.split(r'[,\s()]+', instr)
+        opcode = tokens[0].upper()
+        # Exemplo para ADD: ADD rd, rs, rt
+        if opcode == "ADD":
+            rd = REG_NAMES.index(tokens[1])
+            rs = REG_NAMES.index(tokens[2])
+            rt = REG_NAMES.index(tokens[3])
+            return f"000000 {rs:05b} {rt:05b} {rd:05b} 00000 100000"
+        # Exemplo para ADDI: ADDI rt, rs, imm
+        elif opcode == "ADDI":
+            rt = REG_NAMES.index(tokens[1])
+            rs = REG_NAMES.index(tokens[2])
+            imm = int(tokens[3]) & 0xFFFF
+            return f"001000 {rs:05b} {rt:05b} {imm:016b}"
+        # Outros casos podem ser adicionados aqui...
+        else:
+            return "Conversão não implementada"
 
 # ===============================
 # Exemplo de uso
