@@ -1,9 +1,5 @@
 import re
 
-# ===============================
-# Núcleo Simulador MIPS - main.py
-# ===============================
-
 # Lista dos nomes dos registradores
 REG_NAMES = [
     "$zero", "$at", "$v0", "$v1", "$a0", "$a1", "$a2", "$a3",
@@ -56,6 +52,7 @@ class MIPSSimulator:
         self.instructions = []
         self.labels = {}
         self.pc = 0  # índice da próxima instrução a executar
+        self.executed_binaries = []  # Armazena as instruções convertidas para binário
 
     def reset(self):
         self.__init__()
@@ -86,25 +83,22 @@ class MIPSSimulator:
             return False  # Fim do programa
 
         instr = self.instructions[self.pc].strip()
-        pc_antigo = self.pc
+        self._pc_modified = False
         self.execute_instruction(instr)
-        # Só incrementa se o PC não mudou (não houve salto)
-        if self.pc == pc_antigo:
+        if not self._pc_modified:
             self.pc += 1
         return True
 
     def run(self, step_by_step=False):
         """Executa o programa até o fim."""
-        self.executed_binaries = []
         while self.pc < len(self.instructions):
-            instr = self.instructions[self.pc].strip()
-            self.executed_binaries.append(self.assembly_to_bin(instr))
             self.step()
             if step_by_step:
                 input(f"Pressione Enter para executar a próxima instrução ({self.instructions[self.pc-1]})...")
 
     def execute_instruction(self, instr):
         """Executa uma única instrução em formato Assembly."""
+
         if not instr:
             return
         tokens = re.split(r'[,\s()]+', instr)
@@ -143,38 +137,107 @@ class MIPSSimulator:
             rd, rs, rt = tokens[1:4]
             self.registers[rd] = int(self.registers[rs] < self.registers[rt])
 
-        # Saltos condicionais (simples, usando labels)
+        # Saltos condicionais (BEQ/BNE) com fix para não pular instrução da label
         elif opcode == "BEQ":
             rs, rt, label = tokens[1:4]
             if self.registers[rs] == self.registers[rt]:
                 self.pc = self.labels[label]
-                return  # Importante: não incrementa PC depois de salto
+                self._pc_modified = True
+                # Parte binária: o offset real não é calculado, só exemplo!
         elif opcode == "BNE":
             rs, rt, label = tokens[1:4]
             if self.registers[rs] != self.registers[rt]:
                 self.pc = self.labels[label]
-                return
-        # Salto incondicional (JUMP)
-        elif opcode == "J" or opcode == "JUMP":
-            label = tokens[1]
-            self.pc = self.labels[label]
-            return
+                self._pc_modified = True
+                # Parte binária: o offset real não é calculado, só exemplo!
 
-        # Chamada de sistema (SYSCALL)
-        elif opcode == "SYSCALL":
-            v0 = self.registers["$v0"]
-            if v0 == 1:
-                print(self.registers["$a0"])
-            elif v0 == 4:
-                # Imprimir string (você pode adaptar para buscar uma string em self.memory)
-                print("Imprimir string não implementado")
-            elif v0 == 10:
-                self.pc = len(self.instructions)
-            else:
-                raise ValueError(f"Syscall não implementada: {v0}")
+        # Saída (imprimir inteiro)
+        elif opcode == "PRINT":
+            reg = tokens[1]
+            print(self.registers[reg])
+
+        # Fim do programa
+        elif opcode == "HALT":
+            self.pc = len(self.instructions)  # Força parada
+            self._pc_modified = True
 
         else:
             raise ValueError(f"Instrução não reconhecida: {opcode}")
+
+        # ==============================
+        # BLOCO DA CONVERSÃO PARA BINÁRIO
+        # ==============================
+        bin_instr = self.assembly_to_binary(instr)
+        if bin_instr:
+            self.executed_binaries.append(bin_instr)
+        # ==============================
+        # FIM DO BLOCO BINÁRIO
+        # ==============================
+
+    # =========================================
+    # MÉTODO DE CONVERSÃO SIMPLIFICADO PARA BINÁRIO
+    # =========================================
+    def assembly_to_binary(self, instr):
+        """
+        Converte uma instrução Assembly MIPS simples para uma string binária (exemplo).
+        Este método cobre apenas o subconjunto básico e serve como demonstração didática.
+        """
+        tokens = re.split(r'[,\s()]+', instr)
+        if not tokens or not tokens[0]:
+            return ""
+        opcode = tokens[0].upper()
+        # Mapas de opcode/funct (parcial, para fins didáticos)
+        opcode_map = {
+            "ADD":  "000000",
+            "SUB":  "000000",
+            "AND":  "000000",
+            "OR":   "000000",
+            "SLL":  "000000",
+            "ADDI": "001000",
+            "LW":   "100011",
+            "SW":   "101011",
+            "BEQ":  "000100",
+            "BNE":  "000101",
+            "SLT":  "000000",
+            "PRINT":"111111",  # Não existe em MIPS real, só para visualização
+            "HALT": "111110"   # Não existe em MIPS real, só para visualização
+        }
+        funct_map = {
+            "ADD": "100000",
+            "SUB": "100010",
+            "AND": "100100",
+            "OR":  "100101",
+            "SLL": "000000",
+            "SLT": "101010"
+        }
+        reg_bin = {name: format(i, '05b') for i, name in enumerate(REG_NAMES)}
+        if opcode in ["ADD", "SUB", "AND", "OR", "SLT"]:
+            # Exemplo: ADD rd, rs, rt
+            rd, rs, rt = tokens[1:4]
+            return f"{opcode_map[opcode]}{reg_bin[rs]}{reg_bin[rt]}{reg_bin[rd]}00000{funct_map[opcode]}"
+        elif opcode == "SLL":
+            rd, rt, shamt = tokens[1:4]
+            return f"{opcode_map[opcode]}00000{reg_bin[rt]}{reg_bin[rd]}{format(int(shamt),'05b')}{funct_map[opcode]}"
+        elif opcode == "ADDI":
+            rt, rs, imm = tokens[1:4]
+            return f"{opcode_map[opcode]}{reg_bin[rs]}{reg_bin[rt]}{format(int(imm)&0xFFFF,'016b')}"
+        elif opcode in ["LW", "SW"]:
+            rt, offset, base = tokens[1], tokens[2], tokens[3]
+            return f"{opcode_map[opcode]}{reg_bin[base]}{reg_bin[rt]}{format(int(offset)&0xFFFF,'016b')}"
+        elif opcode in ["BEQ", "BNE"]:
+            rs, rt, label = tokens[1:4]
+            # Offset real não é calculado aqui, só exemplo:
+            return f"{opcode_map[opcode]}{reg_bin[rs]}{reg_bin[rt]}{'0'*16}"
+        elif opcode == "PRINT":
+            reg = tokens[1]
+            return f"{opcode_map[opcode]}{'0'*21}{reg_bin[reg]}{'0'*5}"
+        elif opcode == "HALT":
+            return f"{opcode_map[opcode]}{'0'*26}"
+        else:
+            return ""
+    # =========================================
+    # FIM DO BLOCO DE CONVERSÃO PARA BINÁRIO
+    # =========================================
 
     def get_registers(self):
         return self.registers.as_dict()
@@ -187,47 +250,3 @@ class MIPSSimulator:
         print(self.registers)
         print("\nMemória:")
         print(self.memory)
-
-    def assembly_to_bin(self, instr):
-        tokens = re.split(r'[,\s()]+', instr)
-        opcode = tokens[0].upper()
-        # Exemplo para ADD: ADD rd, rs, rt
-        if opcode == "ADD":
-            rd = REG_NAMES.index(tokens[1])
-            rs = REG_NAMES.index(tokens[2])
-            rt = REG_NAMES.index(tokens[3])
-            return f"000000 {rs:05b} {rt:05b} {rd:05b} 00000 100000"
-        # Exemplo para ADDI: ADDI rt, rs, imm
-        elif opcode == "ADDI":
-            rt = REG_NAMES.index(tokens[1])
-            rs = REG_NAMES.index(tokens[2])
-            imm = int(tokens[3]) & 0xFFFF
-            return f"001000 {rs:05b} {rt:05b} {imm:016b}"
-        # Outros casos podem ser adicionados aqui...
-        else:
-            return "Conversão não implementada"
-
-# ===============================
-# Exemplo de uso
-# ===============================
-if __name__ == "__main__":
-    sim = MIPSSimulator()
-    # Exemplo de programa em Assembly (pode ser substituído por leitura de arquivo)
-    programa = [
-        "ADD $t0, $zero, $zero",
-        "ADDI $t0, $t0, 5",
-        "ADDI $t1, $zero, 10",
-        "ADD $t2, $t0, $t1",
-        "SW $t2, 0, $zero",
-        "LW $t3, 0, $zero",
-        "PRINT $t3",
-        "HALT"
-
-# add $t0, $t0, $zero
-# addi $t0, $zero, 5
-# print $t0
-
-    ]
-    sim.load_assembly(programa)
-    sim.run()
-    sim.show_state()
