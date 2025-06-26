@@ -154,6 +154,19 @@ class MIPSSimulator:
             reg = tokens[1]
             print(self.registers[reg])
 
+        # Chamada de sistema (SYSCALL)
+        elif opcode == "SYSCALL":
+            v0 = self.registers["$v0"]
+            if v0 == 1:
+                print(self.registers["$a0"])
+            elif v0 == 4:
+                # Imprimir string (você pode adaptar para buscar uma string em self.memory)
+                print("Imprimir string não implementado")
+            elif v0 == 10:
+                self.pc = len(self.instructions)
+            else:
+                raise ValueError(f"Syscall não implementada: {v0}")
+
         # Fim do programa
         elif opcode == "HALT":
             self.pc = len(self.instructions)  # Força parada
